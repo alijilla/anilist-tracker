@@ -1,20 +1,21 @@
-# Job Tracker
+# AniList Tracker
 
-A React app for browsing live job listings and saving favorites — built as
-part of the FlyRank Frontend AI Engineering Internship, using AI-assisted
-development (Cursor) as the primary build method.
+A React app for browsing anime/manga via the AniList GraphQL API and 
+saving favorites — built as part of the FlyRank Frontend AI Engineering 
+Internship, using AI-assisted development (GitHub Copilot) as the 
+primary build method.
 
 ## Tech Stack
 
 - React + TypeScript (Vite)
 - Firebase (Authentication + Firestore)
-- Remotive API (job listings)
+- AniList GraphQL API
 
 ## Features
 
-- Browse live job listings
+- Browse anime/manga listings
 - Log in / log out
-- Save and view favorite listings per user
+- Save and view favorites per user
 
 ## Status
 
@@ -22,6 +23,5 @@ development (Cursor) as the primary build method.
 
 ## AI-Assisted Development
 
-This project was built using AI as a development assistant. See
-`PROMPTS.md` for the prompts used and `WORKFLOW.md` (once added) for a
-summary of how AI assisted and what manual corrections were made.
+This project was built using AI (GitHub Copilot) as a development 
+assistant. See `PROMPTS.md` for the prompts used.

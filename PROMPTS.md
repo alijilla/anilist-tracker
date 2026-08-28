@@ -26,3 +26,9 @@ Not fixable from the client side.
 **Fix:** Removed the <img src={job.company_logo}> element from the job 
 card. This was a manual fix, not AI-suggested — found via DevTools console 
 and Network tab debugging.
+
+---
+## Note: project pivoted from job listings (Remotive API) to 
+anime/manga (AniList GraphQL API) on [today's date]. Renamed repo from 
+job-tracker-app to anilist-tracker.
+---

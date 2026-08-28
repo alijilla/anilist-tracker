@@ -1,9 +1,9 @@
-# Job Tracker — AI Assistant Instructions
+# AniList Tracker — AI Assistant Instructions
 
 ## Stack
 - React + TypeScript (Vite)
 - Firebase (Authentication + Firestore)
-- Remotive API for job listings
+- AniList GraphQL API for anime/manga data
 
 ## Conventions
 - Conventional Commits for all commit messages

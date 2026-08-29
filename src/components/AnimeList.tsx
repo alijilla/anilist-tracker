@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { User } from 'firebase/auth'
 import {
   collection,
@@ -26,6 +26,7 @@ interface AniListMedia {
   coverImage: AniListCoverImage
   description?: string | null
   averageScore?: number | null
+  genres?: string[] | null
 }
 
 interface FavoriteDocument {
@@ -52,31 +53,55 @@ interface AniListResponse {
   errors?: AniListError[]
 }
 
+type TrackerStatus = 'finished' | 'queued' | 'rewatch'
+
+interface TrackedAnimeItem {
+  animeId: number
+  title: string
+  coverImage: string
+  status: TrackerStatus
+  hoursWatched: number
+}
+
 interface AnimeListProps {
   user: User
+  searchTerm: string
+  trackedAnime: TrackedAnimeItem[]
+  onStatusChange: (animeId: number, title: string, coverImage: string, status: TrackerStatus) => void
+  onStatusRemove: (animeId: number) => void
 }
 
 const ANILIST_QUERY = `
   query {
-    Page(page: 1, perPage: 20) {
-      media(type: ANIME, sort: POPULARITY_DESC) {
+    Page(page: 1, perPage: 100) {
+      media(type: ANIME, sort: [START_DATE_DESC, POPULARITY_DESC]) {
         id
         title { romaji english }
         coverImage { large }
         description
         averageScore
+        genres
       }
     }
   }
 `
 
-function AnimeList({ user }: AnimeListProps) {
+const PAGE_SIZE = 8
+
+function AnimeList({
+  user,
+  searchTerm,
+  trackedAnime,
+  onStatusChange,
+  onStatusRemove,
+}: AnimeListProps) {
   const [anime, setAnime] = useState<AniListMedia[]>([])
   const [favoriteDocIds, setFavoriteDocIds] = useState<Map<number, string>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [favoriteActionLoading, setFavoriteActionLoading] = useState<number | null>(null)
   const [favoriteActionError, setFavoriteActionError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -86,7 +111,7 @@ function AnimeList({ user }: AnimeListProps) {
         setLoading(true)
         setError(null)
 
-        const response = await fetch('https://graphql.anilist.co', {
+        const response = await fetch('/api/anilist', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -129,6 +154,10 @@ function AnimeList({ user }: AnimeListProps) {
   }, [])
 
   useEffect(() => {
+    setPage(1)
+  }, [searchTerm])
+
+  useEffect(() => {
     if (!user) {
       return
     }
@@ -160,6 +189,22 @@ function AnimeList({ user }: AnimeListProps) {
 
     return () => unsubscribe()
   }, [user])
+
+  const filteredAnime = useMemo(() => {
+    const normalized = searchTerm.trim().toLowerCase()
+
+    if (!normalized) {
+      return anime
+    }
+
+    return anime.filter((entry) => {
+      const title = (entry.title.english || entry.title.romaji || 'Untitled').toLowerCase()
+      return title.includes(normalized)
+    })
+  }, [anime, searchTerm])
+
+  const totalPages = Math.max(1, Math.ceil(filteredAnime.length / PAGE_SIZE))
+  const paginatedAnime = filteredAnime.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const handleFavoriteToggle = async (entry: AniListMedia) => {
     const favoriteDocId = favoriteDocIds.get(entry.id)
@@ -205,8 +250,8 @@ function AnimeList({ user }: AnimeListProps) {
     )
   }
 
-  if (anime.length === 0) {
-    return <div className="anime-list__state">No anime available right now.</div>
+  if (filteredAnime.length === 0) {
+    return <div className="anime-list__state">No anime match your search right now.</div>
   }
 
   return (
@@ -217,9 +262,10 @@ function AnimeList({ user }: AnimeListProps) {
         </div>
       ) : null}
 
-      {anime.map((entry) => {
+      {paginatedAnime.map((entry) => {
         const title = entry.title.english || entry.title.romaji || 'Untitled'
         const isFavorite = favoriteDocIds.has(entry.id)
+        const trackedStatus = trackedAnime.find((item) => item.animeId === entry.id)?.status
 
         return (
           <article className="anime-card" key={entry.id}>
@@ -235,6 +281,29 @@ function AnimeList({ user }: AnimeListProps) {
                 <span className="anime-card__score">⭐ {entry.averageScore ?? 'N/A'}</span>
               </div>
 
+              {entry.genres && entry.genres.length > 0 ? (
+                <div className="anime-card__genres" aria-label="Anime genres">
+                  {entry.genres.slice(0, 3).map((genre) => (
+                    <span key={`${entry.id}-${genre}`} className="anime-card__genre">
+                      {genre}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="anime-card__tracker">
+                {(['finished', 'queued', 'rewatch'] as TrackerStatus[]).map((status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    className={trackedStatus === status ? 'tracker-chip tracker-chip--active' : 'tracker-chip'}
+                    onClick={() => onStatusChange(entry.id, title, entry.coverImage.large ?? '', status)}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+
               <button
                 className={isFavorite ? 'favorite-button favorite-button--danger' : 'favorite-button'}
                 type="button"
@@ -247,10 +316,32 @@ function AnimeList({ user }: AnimeListProps) {
                     ? 'Remove from favorites'
                     : 'Save to favorites'}
               </button>
+
+              {trackedStatus ? (
+                <button
+                  type="button"
+                  className="watchlist-remove watchlist-remove--compact"
+                  onClick={() => onStatusRemove(entry.id)}
+                >
+                  clear status
+                </button>
+              ) : null}
             </div>
           </article>
         )
       })}
+
+      <div className="pagination" aria-label="Anime pagination">
+        <button type="button" className="pagination__button" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+          Previous
+        </button>
+        <span className="pagination__status">
+          Page {page} / {totalPages}
+        </span>
+        <button type="button" className="pagination__button" disabled={page === totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
+          Next
+        </button>
+      </div>
     </section>
   )
 }

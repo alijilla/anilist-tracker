@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { kv } from '@vercel/kv'
 
 const CACHE_TTL_SECONDS = 600
 const ANILIST_ENDPOINT = process.env.ANILIST_ENDPOINT || 'https://graphql.anilist.co'
@@ -38,20 +37,10 @@ function setMemoryCachedResponse(cacheKey, value) {
 }
 
 async function getCachedResponse(cacheKey) {
-  if (process.env.KV_URL || process.env.KV_REST_API_URL) {
-    const value = await kv.get(cacheKey)
-    return value ?? null
-  }
-
   return getMemoryCachedResponse(cacheKey)
 }
 
 async function setCachedResponse(cacheKey, value) {
-  if (process.env.KV_URL || process.env.KV_REST_API_URL) {
-    await kv.set(cacheKey, value, { ex: CACHE_TTL_SECONDS })
-    return
-  }
-
   setMemoryCachedResponse(cacheKey, value)
 }
 

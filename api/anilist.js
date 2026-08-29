@@ -1,35 +1,82 @@
 import { createHash } from 'node:crypto'
+import { kv } from '@vercel/kv'
 
-const CACHE_TTL_MS = 10 * 60 * 1000
+const CACHE_TTL_SECONDS = 600
 const ANILIST_ENDPOINT = process.env.ANILIST_ENDPOINT || 'https://graphql.anilist.co'
-const cache = new Map()
+const memoryCache = new Map()
 
-function getCacheKey(query, variables = {}) {
-  return createHash('sha256')
-    .update(`${query}\n${JSON.stringify(variables)}`)
-    .digest('hex')
+export const config = {
+  runtime: 'nodejs',
 }
 
-function getCachedResponse(cacheKey) {
-  const cached = cache.get(cacheKey)
+function getCacheKey(query, variables = {}) {
+  return `anilist:${createHash('sha256')
+    .update(`${query}\n${JSON.stringify(variables)}`)
+    .digest('hex')}`
+}
+
+function getMemoryCachedResponse(cacheKey) {
+  const cached = memoryCache.get(cacheKey)
 
   if (!cached) {
     return null
   }
 
   if (Date.now() > cached.expiresAt) {
-    cache.delete(cacheKey)
+    memoryCache.delete(cacheKey)
     return null
   }
 
   return cached.value
 }
 
-function setCachedResponse(cacheKey, value) {
-  cache.set(cacheKey, {
-    expiresAt: Date.now() + CACHE_TTL_MS,
+function setMemoryCachedResponse(cacheKey, value) {
+  memoryCache.set(cacheKey, {
+    expiresAt: Date.now() + CACHE_TTL_SECONDS * 1000,
     value,
   })
+}
+
+async function getCachedResponse(cacheKey) {
+  if (process.env.KV_URL || process.env.KV_REST_API_URL) {
+    const value = await kv.get(cacheKey)
+    return value ?? null
+  }
+
+  return getMemoryCachedResponse(cacheKey)
+}
+
+async function setCachedResponse(cacheKey, value) {
+  if (process.env.KV_URL || process.env.KV_REST_API_URL) {
+    await kv.set(cacheKey, value, { ex: CACHE_TTL_SECONDS })
+    return
+  }
+
+  setMemoryCachedResponse(cacheKey, value)
+}
+
+async function readJsonBody(req) {
+  if (req.body && typeof req.body === 'object') {
+    return req.body
+  }
+
+  const chunks = []
+
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+
+  const rawBody = Buffer.concat(chunks).toString('utf8')
+
+  if (!rawBody) {
+    return {}
+  }
+
+  try {
+    return JSON.parse(rawBody)
+  } catch {
+    throw new Error('Invalid JSON body received by the API route.')
+  }
 }
 
 function getRetryDelaySeconds(retryAfterHeader) {
@@ -88,28 +135,28 @@ async function forwardToAniList(query, variables = {}) {
   return response
 }
 
-export default async function handler(request, response) {
-  if (request.method !== 'POST') {
-    return response.status(405).json({
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({
       error: 'Method not allowed. Use POST.',
     })
   }
 
   try {
-    const body = await request.json()
+    const body = await readJsonBody(req)
     const { query, variables = {} } = body ?? {}
 
     if (!query || typeof query !== 'string') {
-      return response.status(400).json({
+      return res.status(400).json({
         error: 'A GraphQL query string is required.',
       })
     }
 
     const cacheKey = getCacheKey(query, variables)
-    const cachedResult = getCachedResponse(cacheKey)
+    const cachedResult = await getCachedResponse(cacheKey)
 
     if (cachedResult) {
-      return response.status(200).json(cachedResult)
+      return res.status(200).json(cachedResult)
     }
 
     const aniListResponse = await forwardToAniList(query, variables)
@@ -126,18 +173,18 @@ export default async function handler(request, response) {
 
       const retryAfter = getRetryDelaySeconds(aniListResponse.headers.get('retry-after'))
 
-      return response.status(aniListResponse.status).json({
+      return res.status(aniListResponse.status).json({
         ...payload,
         retryAfter,
       })
     }
 
     const json = await aniListResponse.json()
-    setCachedResponse(cacheKey, json)
+    await setCachedResponse(cacheKey, json)
 
-    return response.status(200).json(json)
+    return res.status(200).json(json)
   } catch (error) {
-    return response.status(500).json({
+    return res.status(500).json({
       error: error instanceof Error ? error.message : 'Unexpected server error.',
     })
   }
